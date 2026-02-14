@@ -77,6 +77,67 @@ app.post('/updateData', (req, res) => {
     res.sendStatus(200)
 })
 
+
+app.get('/feedback', (req, res) => {
+    // 1. Define paths (Matching your structure)
+    const saxonJar = path.resolve('tools', 'saxon-he.jar')
+    const xmlPath = path.resolve('data', 'feedback.xml')
+    const xslPath = path.resolve('xslt', 'views', 'feedback.xsl')
+
+    // 2. Build the command arguments
+    const success = req.query.success || ''
+
+    const args = [
+        '-jar', saxonJar,
+        `-s:${xmlPath}`,
+        `-xsl:${xslPath}`,
+        `success=${success}` // Pass the success variable to XSLT
+    ]
+
+    // 3. Execute Java Saxon just like your "/" route does
+    execFile('java', args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+            console.error("Java Saxon Error:", stderr)
+            res.status(500).type('text/plain').send("Transformation Error: " + (stderr || err.message))
+            return;
+        }
+        // Send the output as XHTML/HTML
+        res.status(200).type('text/html').send(stdout)
+    })
+})
+
+// Route to handle new feedback submission
+app.post('/submit-feedback', (req, res) => {
+    const { username, rating, comment } = req.body
+    const xmlPath = path.resolve('data', 'feedback.xml')
+
+    // Simple sanitization for XML
+    const cleanUser = username.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    const cleanComment = comment.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+    const newEntry = `
+    <feedback>
+        <user>${cleanUser}</user>
+        <rating>${rating}</rating>
+        <comment>${cleanComment}</comment>
+        <date>${new Date().toISOString()}</date>
+    </feedback>
+</feedbacks>`;
+
+    fs.readFile(xmlPath, 'utf8', (err, data) => {
+        if (err) return res.status(500).send("Error: feedback.xml not found in data folder.")
+        
+        const updatedXml = data.replace('</feedbacks>', newEntry);
+        
+        fs.writeFile(xmlPath, updatedXml, 'utf8', (err) => {
+            // ... inside fs.writeFile ...
+            if (err) return res.status(500).send("Error saving feedback.")
+            // Redirect with a success parameter
+            res.redirect('/feedback?success=true')
+        })
+    })
+})
+
 function validate(xmlDoc, xmlSchema) {
     const xmlDocDatabaseXsd = libxmljs.parseXml(xmlSchema)
     return xmlDoc.validate(xmlDocDatabaseXsd)
